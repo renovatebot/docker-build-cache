@@ -63,7 +63,7 @@ if __name__ == "__main__":
         print(f'Pruning images created before {del_before}')
 
     list_url: str | None = 'https://api.github.com/user/packages/' \
-        f'container/{args.container}/versions'
+        f'container/{args.container}/versions?per_page=100'
 
     while list_url is not None:
         r = s.get(list_url)
