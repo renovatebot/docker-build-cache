@@ -2,9 +2,24 @@ name: prune
 # based on https://github.com/airtower-luna/hello-ghcr
 
 on:
+  push:
+    branches:
+      - main
+      
+  pull_request:
+
   schedule:
     - cron: '5 4 * * 1' # early monday https://crontab.guru/#5_4_*_*_1
+
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry-Run'
+        default: 'true'
+        required: false
+
+env:
+  DRY_RUN: true
 
 permissions:
   contents: read
@@ -32,6 +47,14 @@ jobs:
 
       - name: Install pdm dependencies
         run: pdm install --prod
+
+      - name: Check dry run
+        run: |
+          if [[ "${{github.event_name}}" == "workflow_dispatch" && "${{ github.event.inputs.dry-run }}" != "true"  ]]; then
+            echo "DRY_RUN=false" >> "$GITHUB_ENV"
+          elif [[ "${{github.ref_name}}" == "${{ github.event.repository.default_branch }}" ]]; then
+            echo "DRY_RUN=false" >> "$GITHUB_ENV"
+          fi
 
       - name: Prune untagged images
         env:
