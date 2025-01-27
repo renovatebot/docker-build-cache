@@ -64,4 +64,4 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pdm run ghcr-prune.py --container ${{ matrix.image.name }} --prune-age 30 ${{ env.DRY_RUN && '--dry-run' || '' }}
+          pdm run ghcr-prune.py --container ${{ matrix.image.name }} --prune-age 30 ${{ env.DRY_RUN == 'true' && '--dry-run' || '' }}
