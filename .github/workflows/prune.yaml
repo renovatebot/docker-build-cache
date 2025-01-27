@@ -28,12 +28,14 @@ permissions:
 jobs:
   prune:
     runs-on: ubuntu-22.04
+    name: build (${{ matrix.image.name }})
 
     strategy:
       fail-fast: false
       matrix:
        image:
-        - docker-build-cache
+        - name: docker-build-cache
+          dry-run: false
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -50,7 +52,9 @@ jobs:
 
       - name: Check dry run
         run: |
-          if [[ "${{github.event_name}}" == "workflow_dispatch" && "${{ github.event.inputs.dry-run }}" != "true"  ]]; then
+          if [[ "${{ matrix.image.name }}" == "true" ]]; then
+            echo "DRY_RUN=true" >> "$GITHUB_ENV"
+          elif [[ "${{github.event_name}}" == "workflow_dispatch" && "${{ github.event.inputs.dry-run }}" != "true"  ]]; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
           elif [[ "${{github.ref_name}}" == "${{ github.event.repository.default_branch }}" ]]; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
@@ -60,4 +64,4 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pdm run ghcr-prune.py --container ${{ matrix.image }} --prune-age 30 ${{ env.DRY_RUN == 'true' && '--dry-run' }}
+          pdm run ghcr-prune.py --container ${{ matrix.image.name }} --prune-age 30 --dry-run ${{ env.DRY_RUN }}
