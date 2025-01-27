@@ -82,23 +82,24 @@ if __name__ == "__main__":
             print(versions)
 
         for v in versions:
-            metadata = v["metadata"]["container"]
-            print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}\t{metadata["tags"]}')
+            print(f'{v}')
 
-            created = None
             try:
-                create = datetime.fromisoformat(v['created_at'])
-            except:
-                print(f'created date error {v["html_url"]}')
+                metadata = v["metadata"]["container"]
+                # print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}\t{metadata["tags"]}')
+                created = datetime.fromisoformat(v['created_at'])
 
-            # prune old untagged images if requested
-            if del_before is not None and created is not None and created < del_before \
-               and len(metadata['tags']) == 0:
-                if args.dry_run:
-                    print(f'would delete {v["id"]}')
-                else:
-                    r = s.delete(
-                        'https://api.github.com/user/packages/'
-                        f'container/{args.container}/versions/{v["id"]}')
-                    r.raise_for_status()
-                    print(f'deleted {v["id"]}')
+                # prune old untagged images if requested
+                if del_before is not None and created < del_before \
+                and len(metadata['tags']) == 0:
+                    if args.dry_run:
+                        print(f'would delete {v["id"]}')
+                    else:
+                        r = s.delete(
+                            'https://api.github.com/user/packages/'
+                            f'container/{args.container}/versions/{v["id"]}')
+                        r.raise_for_status()
+                        print(f'deleted {v["id"]}')
+                    
+            except Exception as X:
+                print(f'unexpected error\n{X}')
