@@ -3,7 +3,7 @@ name: prune
 
 on:
   schedule:
-    - cron: '@weekly'
+    - cron: '5 4 * * 1' # early monday https://crontab.guru/#5_4_*_*_1
   workflow_dispatch:
 
 permissions:
