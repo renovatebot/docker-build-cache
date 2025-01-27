@@ -82,7 +82,7 @@ if __name__ == "__main__":
             print(versions)
 
         for v in versions:
-            print(f'{v}')
+            print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}')
 
             try:
                 metadata = v["metadata"]["container"]
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
                 # prune old untagged images if requested
                 if del_before is not None and created < del_before \
-                and len(metadata['tags']) == 0:
+                   and len(metadata['tags']) == 0:
                     if args.dry_run:
                         print(f'would delete {v["id"]}')
                     else:
@@ -102,4 +102,5 @@ if __name__ == "__main__":
                         print(f'deleted {v["id"]}')
                     
             except Exception as X:
-                print(f'unexpected error\n{X}')
+                print(f'unexpected error\n{v}\n{X}')
+                pass
