@@ -1,0 +1,13 @@
+[project]
+dependencies = [
+    "requests==2.32.3"
+]
+requires-python = ">=3.13"
+
+[tool.pdm]
+distribution = false
+
+[dependency-groups]
+dev = [
+    "argcomplete>=3.5.3",
+]
