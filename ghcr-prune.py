@@ -82,9 +82,8 @@ if __name__ == "__main__":
             print(versions)
 
         for v in versions:
-            print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}')
-
             try:
+                print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}')
                 metadata = v["metadata"]["container"]
                 # print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}\t{metadata["tags"]}')
                 created = datetime.fromisoformat(v['created_at'])
