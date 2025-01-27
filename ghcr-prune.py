@@ -85,7 +85,7 @@ if __name__ == "__main__":
             metadata = v["metadata"]["container"]
             print(f'{v["id"]}\t{v["name"]}\t{v['created_at']}\t{metadata["tags"]}')
 
-            created = datetime()
+            created = datetime.max
             try:
                 create = datetime.fromisoformat(v['created_at'])
             except:
