@@ -44,7 +44,7 @@ jobs:
         uses: pdm-project/setup-pdm@94a823180e06fcde4ad29308721954a521c96ed0 # v4.4
         with:
           python-version-file: .python-version
-          version: 2.25.5 # renovate: datasource=pypi depName=pdm
+          version: 2.25.6 # renovate: datasource=pypi depName=pdm
           cache: true
 
       - name: Install pdm dependencies
