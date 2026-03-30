@@ -1,6 +1,6 @@
 [project]
 dependencies = [
-    "requests==2.33.0"
+    "requests==2.33.1"
 ]
 requires-python = ">=3.13"
 
