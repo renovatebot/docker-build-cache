@@ -1,0 +1,7 @@
+[python]
+# use global python
+# https://github.com/pdm-project/pdm/pull/3435
+use_python_version = false
+
+[venv]
+backend = "venv"
