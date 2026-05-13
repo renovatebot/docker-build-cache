@@ -38,7 +38,7 @@ jobs:
           dry-run: false
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup PDM
         uses: pdm-project/setup-pdm@973541a5febeafcfdadf8a51211435be6ecfd90f # v4.5
