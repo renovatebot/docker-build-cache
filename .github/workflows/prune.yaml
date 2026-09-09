@@ -52,7 +52,7 @@ jobs:
 
       - name: Check dry run
         run: |
-          if [[ "${{ matrix.image.name }}" == "true" ]]; then
+          if [[ "${{ matrix.image.dry-run }}" == "true" ]]; then
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
           elif [[ "${{github.event_name}}" == "workflow_dispatch" && "${{ github.event.inputs.dry-run }}" != "true"  ]]; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
