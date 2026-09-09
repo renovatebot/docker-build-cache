@@ -106,7 +106,7 @@ if __name__ == "__main__":
                         print(f'would delete {v["id"]}')
                     else:
                         r = s.delete(
-                            f'{base_url}/{args.container}/versions/{v["id"]}')
+                            f'{base_url}{args.container}/versions/{v["id"]}')
                         r.raise_for_status()
                         print(f'deleted {v["id"]}')
                     
