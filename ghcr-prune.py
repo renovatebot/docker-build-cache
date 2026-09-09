@@ -6,16 +6,16 @@ import os
 import requests
 from datetime import datetime, timedelta
 
-__author__ = "Fiona Klute"
-__version__ = "0.1"
-__copyright__ = "Copyright (C) 2021 Fiona Klute"
+__author__ = "Michael Kriese"
+__version__ = "0.2"
+__copyright__ = "Copyright (C) 2026 Michael Kriese"
 __license__ = "MIT"
 # https://github.com/airtower-luna/hello-ghcr/blob/main/ghcr-prune.py
 
 # GitHub API documentation: https://docs.github.com/en/rest/reference/packages
 github_api_accept = 'application/vnd.github.v3+json'
-# https://docs.github.com/en/rest/overview/api-versions?apiVersion=2022-11-28
-github_api_version = '2022-11-28'
+# https://docs.github.com/en/rest/overview/api-versions?apiVersion=2026-03-10
+github_api_version = '2026-03-10'
 
 
 if __name__ == "__main__":
@@ -25,6 +25,9 @@ if __name__ == "__main__":
     parser.add_argument('--token', '-t', action='store_true',
                         help='ask for token input instead of using the '
                         'GHCR_TOKEN environment variable')
+    parser.add_argument('--org', default=None,
+                        help='name of the container image organization '
+                        'defaults to GITHUB_REPOSITORY_OWNER')
     parser.add_argument('--container', default='hello-ghcr-meow',
                         help='name of the container image')
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -52,6 +55,13 @@ if __name__ == "__main__":
     else:
         raise ValueError('missing authentication token')
 
+    if args.org:
+        org = getpass.getpass('Enter Token: ')
+    elif 'GITHUB_REPOSITORY_OWNER' in os.environ:
+        org = os.environ['GITHUB_REPOSITORY_OWNER']
+    else:
+        raise ValueError('missing authentication token')
+
     s = requests.Session()
     s.headers.update({'Authorization': f'token {token}',
                       'Accept': github_api_accept,
@@ -62,8 +72,9 @@ if __name__ == "__main__":
     if del_before:
         print(f'Pruning images created before {del_before}')
 
-    list_url: str | None = 'https://api.github.com/user/packages/' \
-        f'container/{args.container}/versions?per_page=100'
+    base_url = f'https://api.github.com/orgs/{org}/packages/container/'
+
+    list_url: str | None = f'{base_url}{args.container}/versions?per_page=100'
 
     while list_url is not None:
         r = s.get(list_url)
@@ -95,8 +106,7 @@ if __name__ == "__main__":
                         print(f'would delete {v["id"]}')
                     else:
                         r = s.delete(
-                            'https://api.github.com/user/packages/'
-                            f'container/{args.container}/versions/{v["id"]}')
+                            f'{base_url}/{args.container}/versions/{v["id"]}')
                         r.raise_for_status()
                         print(f'deleted {v["id"]}')
                     
