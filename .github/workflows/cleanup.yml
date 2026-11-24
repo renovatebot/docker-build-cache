@@ -1,0 +1,75 @@
+name: cleanup
+
+# Deletes untagged versions of the docker-build-cache package after 30 days,
+# see `.github/cleanup.sh`. Runs hourly, as the token can only send a limited
+# number of requests an hour: a backlog takes several runs, afterwards a run
+# only reads a few pages.
+# Pull requests, like Renovate updates, run it as a dry run on a few pages.
+on:
+  schedule:
+    - cron: '17 * * * *'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Only list the versions to delete'
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'cleanup' }}
+  # a newer push replaces the dry run of a pull request, a cleanup is never cancelled
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  cleanup:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # the script stops after 45 minutes
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Delete old versions
+        run: .github/cleanup.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORG: ${{ github.repository_owner }}
+          # this repository needs the admin role on each of them
+          PACKAGES: docker-build-cache
+          DRY_RUN: ${{ inputs.dry-run || 'false' }}
+          # in days, for untagged versions
+          MAX_UNTAGGED_AGE: 30
+
+  # only reads, so it can't delete anything whatever the pull request changes
+  dry-run:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: List old versions
+        run: .github/cleanup.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORG: ${{ github.repository_owner }}
+          PACKAGES: docker-build-cache
+          DRY_RUN: 'true'
+          MAX_PAGES: 5
+          MAX_DURATION: 600
+          MAX_UNTAGGED_AGE: 30
