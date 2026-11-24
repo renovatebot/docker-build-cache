@@ -12,24 +12,24 @@ requires_python = ">=3.13"
 
 [[package]]
 name = "argcomplete"
-version = "3.7.2"
+version = "3.8.0"
 requires_python = ">=3.10"
 summary = "Bash tab completion for argparse"
 groups = ["dev"]
 files = [
-    {file = "argcomplete-3.7.2-py3-none-any.whl", hash = "sha256:6029205678bdd9c1c728a155f5f9ecf5812393f969eef58807641a2bc2aa5b19"},
-    {file = "argcomplete-3.7.2.tar.gz", hash = "sha256:aad8b69a0b9969edb62db0d1752354c0d50717b10e0cbb00e2a958381b9fc6b9"},
+    {file = "argcomplete-3.8.0-py3-none-any.whl", hash = "sha256:1fcc7b143e22a22b04629773a40751fb78976bc9cc0912f1fef6c70b51b48ef9"},
+    {file = "argcomplete-3.8.0.tar.gz", hash = "sha256:0114d634013e11ac92cc329b3a7d886c3506e98ddc7bb23c99b1782aacc8b8bd"},
 ]
 
 [[package]]
 name = "certifi"
-version = "2026.10.23"
+version = "2026.11.20"
 requires_python = ">=3.7"
 summary = "Python package for providing Mozilla's CA Bundle."
 groups = ["default"]
 files = [
-    {file = "certifi-2026.10.23-py3-none-any.whl", hash = "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1"},
-    {file = "certifi-2026.10.23.tar.gz", hash = "sha256:a9895e6e2758b371e0545e321a3a8fd1fcfd9829ada8824a936dfb16aaaf36cd"},
+    {file = "certifi-2026.11.20-py3-none-any.whl", hash = "sha256:7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f"},
+    {file = "certifi-2026.11.20.tar.gz", hash = "sha256:af1cb240a8133f105aa52684a3a3258339d7f2fd0bd4e2812698ff5cf5588c4e"},
 ]
 
 [[package]]
