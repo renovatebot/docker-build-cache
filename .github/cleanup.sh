@@ -112,11 +112,16 @@ delete_version() {
   fi
   if ((status == 124)) || [[ "${delete_error}" =~ HTTP\ 5[0-9][0-9] ]]; then
     delete_retry=1
-    # the version may be deleted despite the error
-    if can_request; then
+    # the version may be deleted despite the error. The budget for this check
+    # is reserved with the delete, see `cleanup_package`.
+    if ((SECONDS < MAX_DURATION)); then
       delete_requests=2
-      if ! check="$(gh_api --silent "${url}" 2>&1)" && [[ "${check}" =~ HTTP\ 404 ]]; then
-        delete_gone=1
+      if ! check="$(gh_api --silent "${url}" 2>&1)"; then
+        if [[ "${check}" =~ HTTP\ 404 ]]; then
+          delete_gone=1
+        elif [[ "${check}" =~ (secondary\ rate\ limit|HTTP\ 429) ]]; then
+          delete_limit=1
+        fi
       fi
     fi
   fi
@@ -124,7 +129,8 @@ delete_version() {
 }
 
 # deletes a version in the background, writes `<result> <requests> <error>`
-# to `<folder>/<id>`, with the result `ok`, `gone`, `retry`, `limit` or `fail`
+# to `<folder>/<id>.result`, with the result `ok`, `gone`, `retry`, `limit` or
+# `fail`
 delete_job() {
   local url="$1" id="$2" dir="$3" result=fail
   delete_error=""
@@ -137,7 +143,15 @@ delete_job() {
   elif ((delete_retry)); then
     result=retry
   fi
-  echo "${result} ${delete_requests} ${delete_error}" > "${dir}/${id}"
+  echo "${result} ${delete_requests} ${delete_error}" > "${dir}/${id}.result.tmp"
+  # complete files only, `must_stop` reads them while others still run
+  mv "${dir}/${id}.result.tmp" "${dir}/${id}.result"
+}
+
+# whether a finished delete of this page hit a rate limit or failed, so no
+# further deletes should start
+must_stop() {
+  grep -qsE '^(limit|fail) ' "${jobs_dir}"/*.result
 }
 
 # result files of the deletes of a page
@@ -207,15 +221,21 @@ cleanup_package() {
         deleted=$((deleted + 1))
         continue
       fi
-      if ! can_request; then
+      # room for the delete and a check after an error
+      if ((budget < 2)) || ! can_request; then
         stopped="${package} at page ${page}"
         break
       fi
       while (($(jobs -rp | wc -l) >= PARALLEL)); do
         wait -n || true
       done
-      # the delete, a check after an error is counted with its result
-      budget=$((budget - 1))
+      # a finished delete hit a rate limit or failed, the results below say
+      # which
+      if must_stop; then
+        break
+      fi
+      # reserves the check too, the results give back what wasn't used
+      budget=$((budget - 2))
       delete_job "${api}/${id}" "${id}" "${jobs_dir}" &
       started+=("${id} ${tags}")
     done <<< "${selected}"
@@ -224,8 +244,8 @@ cleanup_package() {
     # the results in the order of the page
     for entry in "${started[@]}"; do
       read -r id tags <<< "${entry}"
-      read -r result requests error < "${jobs_dir}/${id}"
-      budget=$((budget - requests + 1))
+      read -r result requests error < "${jobs_dir}/${id}.result"
+      budget=$((budget + 2 - requests))
       case "${result}" in
         ok)
           echo "deleted ${package} ${id} ${tags}"
