@@ -110,9 +110,10 @@ delete_version() {
     delete_limit=1
     return 1
   fi
-  # only client errors are lasting, like a server error, a timeout or a broken
-  # response (`unexpected end of JSON input`), anything else may pass next time
-  if ((status == 124)) || ! [[ "${delete_error}" =~ HTTP\ 4[0-9][0-9] ]]; then
+  # only client errors are lasting; anything else, like a server error, a
+  # timeout or a broken response (`unexpected end of JSON input`), may pass
+  # next time
+  if ! [[ "${delete_error}" =~ HTTP\ 4[0-9][0-9] ]]; then
     delete_retry=1
     # the version may be deleted despite the error. The budget for this check
     # is reserved with the delete, see `cleanup_package`.
