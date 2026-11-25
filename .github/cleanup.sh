@@ -19,10 +19,10 @@
 # run is used up; the next run starts at the first page again.
 #
 # PARALLEL deletes run at the same time. A delete that fails is checked: if
-# the version is gone, it counts as deleted. A delete that fails with a server
-# error or a timeout is left to the next run, with a warning; a secondary rate
-# limit stops the run, the next run continues; other errors, like a missing
-# admin role, fail the run.
+# the version is gone, it counts as deleted. A secondary rate limit stops the
+# run, the next run continues. Other client errors (4xx), like a missing admin
+# role, fail the run. Anything else, like a server error, a timeout or a broken
+# response, is left to the next run, with a warning.
 #
 # Usage: cleanup.sh, configured by the environment variables below.
 
@@ -110,7 +110,9 @@ delete_version() {
     delete_limit=1
     return 1
   fi
-  if ((status == 124)) || [[ "${delete_error}" =~ HTTP\ 5[0-9][0-9] ]]; then
+  # only client errors are lasting, like a server error, a timeout or a broken
+  # response (`unexpected end of JSON input`), anything else may pass next time
+  if ((status == 124)) || ! [[ "${delete_error}" =~ HTTP\ 4[0-9][0-9] ]]; then
     delete_retry=1
     # the version may be deleted despite the error. The budget for this check
     # is reserved with the delete, see `cleanup_package`.
@@ -314,7 +316,7 @@ else
   echo "${deleted} versions deleted, ${postponed} left for the next run, ${failed} failed" | tee -a "${summary}"
 fi
 if ((postponed > 0)); then
-  echo "::warning::${postponed} versions could not be deleted because of server errors or rate limits, the next run retries them"
+  echo "::warning::${postponed} versions could not be deleted because of transient errors or rate limits, the next run retries them"
 fi
 if ((failed > 0)); then
   echo "::error::${failed} versions could not be deleted"
