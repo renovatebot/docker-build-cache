@@ -18,10 +18,11 @@
 # without old versions. It stops when the request budget or the time of this
 # run is used up; the next run starts at the first page again.
 #
-# A delete that fails is checked: if the version is gone, it counts as
-# deleted. A delete that fails with a server error or a timeout is left to the
-# next run, with a warning; other errors, like a missing admin role, fail the
-# run.
+# PARALLEL deletes run at the same time. A delete that fails is checked: if
+# the version is gone, it counts as deleted. A delete that fails with a server
+# error or a timeout is left to the next run, with a warning; a secondary rate
+# limit stops the run, the next run continues; other errors, like a missing
+# admin role, fail the run.
 #
 # Usage: cleanup.sh, configured by the environment variables below.
 
@@ -41,6 +42,10 @@ REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-60}"
 # page reads per package, 0 for no limit; the dry run in pull requests reads
 # only a few to leave the budget to the cleanup
 MAX_PAGES="${MAX_PAGES:-0}"
+# deletes at the same time. A delete counts 5 points of the secondary rate
+# limit of 900 points a minute, so at most 180 deletes a minute; a delete takes
+# about a second.
+PARALLEL="${PARALLEL:-2}"
 
 cutoff="$(date -u -d "-${MAX_AGE} hours" +%Y-%m-%dT%H:%M:%SZ)"
 untagged_cutoff="$(date -u -d "-${MAX_UNTAGGED_AGE} days" +%Y-%m-%dT%H:%M:%SZ)"
@@ -73,14 +78,17 @@ can_request() {
   ((budget > 0 && SECONDS < MAX_DURATION))
 }
 
-# deletes a version. If that fails, sets `delete_error` to gh's error and the
-# request id of the response, `delete_gone` if the version is gone anyway, as
-# after some server errors, and `delete_retry` if the next run should try again.
+# deletes a version, `error_file` takes gh's error. If that fails, sets
+# `delete_error` to gh's error and the request id of the response,
+# `delete_gone` if the version is gone anyway, as after some server errors,
+# `delete_retry` if the next run should try again, and `delete_limit` on a
+# secondary rate limit. `delete_requests` is the number of requests it sent.
 delete_version() {
-  local url="$1" status=0 headers check request_id
+  local url="$1" error_file="$2" status=0 headers check request_id
   delete_gone=0
   delete_retry=0
-  budget=$((budget - 1))
+  delete_limit=0
+  delete_requests=1
   headers="$(gh_api --include -X DELETE "${url}" 2> "${error_file}")" || status=$?
   if ((status == 0)); then
     return 0
@@ -98,11 +106,15 @@ delete_version() {
     delete_gone=1
     return 1
   fi
+  if [[ "${delete_error}" =~ (secondary\ rate\ limit|HTTP\ 429) ]]; then
+    delete_limit=1
+    return 1
+  fi
   if ((status == 124)) || [[ "${delete_error}" =~ HTTP\ 5[0-9][0-9] ]]; then
     delete_retry=1
     # the version may be deleted despite the error
     if can_request; then
-      budget=$((budget - 1))
+      delete_requests=2
       if ! check="$(gh_api --silent "${url}" 2>&1)" && [[ "${check}" =~ HTTP\ 404 ]]; then
         delete_gone=1
       fi
@@ -111,9 +123,26 @@ delete_version() {
   return 1
 }
 
-# gh's error messages of deletes
-error_file="$(mktemp)"
-trap 'rm -f "${error_file}"' EXIT
+# deletes a version in the background, writes `<result> <requests> <error>`
+# to `<folder>/<id>`, with the result `ok`, `gone`, `retry`, `limit` or `fail`
+delete_job() {
+  local url="$1" id="$2" dir="$3" result=fail
+  delete_error=""
+  if delete_version "${url}" "${dir}/${id}.err"; then
+    result=ok
+  elif ((delete_gone)); then
+    result=gone
+  elif ((delete_limit)); then
+    result=limit
+  elif ((delete_retry)); then
+    result=retry
+  fi
+  echo "${result} ${delete_requests} ${delete_error}" > "${dir}/${id}"
+}
+
+# result files of the deletes of a page
+jobs_dir="$(mktemp -d)"
+trap 'rm -rf "${jobs_dir}"' EXIT
 
 # requests left of this run, from the remaining hourly limit of the token,
 # checking it doesn't count against the limit
@@ -167,6 +196,8 @@ cleanup_package() {
     ' <<< "${versions}")"
 
     page_deleted=0
+    local started=() result requests error
+    rm -f "${jobs_dir}"/*
     while read -r id tags; do
       [[ -n "${id}" ]] || continue
       # failed in this run already, left for the next run
@@ -178,27 +209,55 @@ cleanup_package() {
       fi
       if ! can_request; then
         stopped="${package} at page ${page}"
-        return
+        break
       fi
-      if delete_version "${api}/${id}"; then
-        echo "deleted ${package} ${id} ${tags}"
-        deleted=$((deleted + 1))
-        page_deleted=$((page_deleted + 1))
-      elif ((delete_gone)); then
-        echo "deleted ${package} ${id} ${tags}, though the delete answered: ${delete_error}"
-        deleted=$((deleted + 1))
-        page_deleted=$((page_deleted + 1))
-      elif ((delete_retry)); then
-        echo "::warning::could not delete ${package} ${id} ${tags}, the next run retries: ${delete_error}"
-        postponed=$((postponed + 1))
-        postponed_ids[${id}]=1
-      else
-        # like a missing admin role, the other deletes would fail as well
-        echo "::error::failed to delete ${package} ${id} ${tags}: ${delete_error}"
-        failed=$((failed + 1))
-        return
-      fi
+      while (($(jobs -rp | wc -l) >= PARALLEL)); do
+        wait -n || true
+      done
+      # the delete, a check after an error is counted with its result
+      budget=$((budget - 1))
+      delete_job "${api}/${id}" "${id}" "${jobs_dir}" &
+      started+=("${id} ${tags}")
     done <<< "${selected}"
+    wait || true
+
+    # the results in the order of the page
+    for entry in "${started[@]}"; do
+      read -r id tags <<< "${entry}"
+      read -r result requests error < "${jobs_dir}/${id}"
+      budget=$((budget - requests + 1))
+      case "${result}" in
+        ok)
+          echo "deleted ${package} ${id} ${tags}"
+          deleted=$((deleted + 1))
+          page_deleted=$((page_deleted + 1))
+          ;;
+        gone)
+          echo "deleted ${package} ${id} ${tags}, though the delete answered: ${error}"
+          deleted=$((deleted + 1))
+          page_deleted=$((page_deleted + 1))
+          ;;
+        retry)
+          echo "::warning::could not delete ${package} ${id} ${tags}, the next run retries: ${error}"
+          postponed=$((postponed + 1))
+          postponed_ids[${id}]=1
+          ;;
+        limit)
+          echo "::warning::could not delete ${package} ${id} ${tags}, rate limited: ${error}"
+          postponed=$((postponed + 1))
+          postponed_ids[${id}]=1
+          stopped="${package} at page ${page}, rate limited"
+          ;;
+        *)
+          # like a missing admin role, the other deletes would fail as well
+          echo "::error::failed to delete ${package} ${id} ${tags}: ${error}"
+          failed=$((failed + 1))
+          ;;
+      esac
+    done
+    if [[ -n "${stopped}" ]] || ((failed > 0)); then
+      return
+    fi
 
     # deleted versions made room for later ones, read this page again
     if ((page_deleted == 0)); then
@@ -235,7 +294,7 @@ else
   echo "${deleted} versions deleted, ${postponed} left for the next run, ${failed} failed" | tee -a "${summary}"
 fi
 if ((postponed > 0)); then
-  echo "::warning::${postponed} versions could not be deleted because of server errors, the next run retries them"
+  echo "::warning::${postponed} versions could not be deleted because of server errors or rate limits, the next run retries them"
 fi
 if ((failed > 0)); then
   echo "::error::${failed} versions could not be deleted"
