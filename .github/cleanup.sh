@@ -18,6 +18,11 @@
 # without old versions. It stops when the request budget or the time of this
 # run is used up; the next run starts at the first page again.
 #
+# A delete that fails is checked: if the version is gone, it counts as
+# deleted. A delete that fails with a server error or a timeout is left to the
+# next run, with a warning; other errors, like a missing admin role, fail the
+# run.
+#
 # Usage: cleanup.sh, configured by the environment variables below.
 
 set -euo pipefail
@@ -67,6 +72,48 @@ gh_get() {
 can_request() {
   ((budget > 0 && SECONDS < MAX_DURATION))
 }
+
+# deletes a version. If that fails, sets `delete_error` to gh's error and the
+# request id of the response, `delete_gone` if the version is gone anyway, as
+# after some server errors, and `delete_retry` if the next run should try again.
+delete_version() {
+  local url="$1" status=0 headers check request_id
+  delete_gone=0
+  delete_retry=0
+  budget=$((budget - 1))
+  headers="$(gh_api --include -X DELETE "${url}" 2> "${error_file}")" || status=$?
+  if ((status == 0)); then
+    return 0
+  fi
+  if ((status == 124)); then
+    delete_error="no response within ${REQUEST_TIMEOUT}s"
+  else
+    delete_error="$(tr -s '[:space:]' ' ' < "${error_file}" | cut -c 1-300)"
+    request_id="$(sed -n 's/^x-github-request-id: *\([^[:space:]]*\).*/\1/Ip' <<< "${headers}" | head -n 1)"
+    if [[ -n "${request_id}" ]]; then
+      delete_error="${delete_error% }, request ${request_id}"
+    fi
+  fi
+  if [[ "${delete_error}" =~ HTTP\ 404 ]]; then
+    delete_gone=1
+    return 1
+  fi
+  if ((status == 124)) || [[ "${delete_error}" =~ HTTP\ 5[0-9][0-9] ]]; then
+    delete_retry=1
+    # the version may be deleted despite the error
+    if can_request; then
+      budget=$((budget - 1))
+      if ! check="$(gh_api --silent "${url}" 2>&1)" && [[ "${check}" =~ HTTP\ 404 ]]; then
+        delete_gone=1
+      fi
+    fi
+  fi
+  return 1
+}
+
+# gh's error messages of deletes
+error_file="$(mktemp)"
+trap 'rm -f "${error_file}"' EXIT
 
 # requests left of this run, from the remaining hourly limit of the token,
 # checking it doesn't count against the limit
@@ -122,6 +169,8 @@ cleanup_package() {
     page_deleted=0
     while read -r id tags; do
       [[ -n "${id}" ]] || continue
+      # failed in this run already, left for the next run
+      [[ -z "${postponed_ids[${id}]:-}" ]] || continue
       if [[ "${DRY_RUN}" == "true" ]]; then
         echo "would delete ${package} ${id} ${tags}"
         deleted=$((deleted + 1))
@@ -131,14 +180,23 @@ cleanup_package() {
         stopped="${package} at page ${page}"
         return
       fi
-      budget=$((budget - 1))
-      if gh_api --silent -X DELETE "${api}/${id}"; then
+      if delete_version "${api}/${id}"; then
         echo "deleted ${package} ${id} ${tags}"
         deleted=$((deleted + 1))
         page_deleted=$((page_deleted + 1))
+      elif ((delete_gone)); then
+        echo "deleted ${package} ${id} ${tags}, though the delete answered: ${delete_error}"
+        deleted=$((deleted + 1))
+        page_deleted=$((page_deleted + 1))
+      elif ((delete_retry)); then
+        echo "::warning::could not delete ${package} ${id} ${tags}, the next run retries: ${delete_error}"
+        postponed=$((postponed + 1))
+        postponed_ids[${id}]=1
       else
-        echo "::warning::failed to delete ${package} ${id} ${tags}"
+        # like a missing admin role, the other deletes would fail as well
+        echo "::error::failed to delete ${package} ${id} ${tags}: ${delete_error}"
         failed=$((failed + 1))
+        return
       fi
     done <<< "${selected}"
 
@@ -150,6 +208,8 @@ cleanup_package() {
 }
 
 deleted=0
+postponed=0
+declare -A postponed_ids=()
 failed=0
 stopped=""
 # starts with another package every hour, so a backlog in one package doesn't
@@ -159,7 +219,7 @@ offset=$((10#$(date -u +%H) % ${#packages[@]}))
 for ((i = 0; i < ${#packages[@]}; i++)); do
   package="${packages[$(((offset + i) % ${#packages[@]}))]}"
   cleanup_package "${package}"
-  if [[ -n "${stopped}" ]]; then
+  if [[ -n "${stopped}" ]] || ((failed > 0)); then
     break
   fi
 done
@@ -172,7 +232,10 @@ fi
 if [[ "${DRY_RUN}" == "true" ]]; then
   echo "${deleted} versions would be deleted" | tee -a "${summary}"
 else
-  echo "${deleted} versions deleted, ${failed} failed" | tee -a "${summary}"
+  echo "${deleted} versions deleted, ${postponed} left for the next run, ${failed} failed" | tee -a "${summary}"
+fi
+if ((postponed > 0)); then
+  echo "::warning::${postponed} versions could not be deleted because of server errors, the next run retries them"
 fi
 if ((failed > 0)); then
   echo "::error::${failed} versions could not be deleted"
