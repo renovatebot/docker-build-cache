@@ -26,9 +26,10 @@ concurrency:
 jobs:
   cleanup:
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    # the script stops after 45 minutes
-    timeout-minutes: 55
+    # the backlog is gone, a run only reads the pages; slim jobs end after 15 minutes
+    runs-on: ubuntu-slim
+    # the script stops after MAX_DURATION
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -46,6 +47,8 @@ jobs:
           # this repository needs the admin role on each of them
           PACKAGES: docker-build-cache
           DRY_RUN: ${{ inputs.dry-run || 'false' }}
+          # in seconds, before the job timeout
+          MAX_DURATION: 720
           # in days, for untagged versions
           MAX_UNTAGGED_AGE: 30
 
