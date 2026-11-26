@@ -57,13 +57,18 @@ gh_api() {
 
 # reads from the api into `response`, retrying failed requests like server
 # errors; every attempt counts against the budget. Not run in a subshell, so
-# the budget is kept.
+# the budget is kept. Returns 2 on a rate limit, which a retry doesn't help.
 gh_get() {
-  local attempt
+  local attempt error
   for attempt in 1 2 3; do
     budget=$((budget - 1))
-    if response="$(gh_api "$@")"; then
+    if response="$(gh_api "$@" 2> "${jobs_dir}/read.err")"; then
       return 0
+    fi
+    error="$(tr -s '[:space:]' ' ' < "${jobs_dir}/read.err")"
+    echo "${error}" | cut -c 1-300 >&2
+    if [[ "${error}" =~ (rate\ limit|HTTP\ 429) ]]; then
+      return 2
     fi
     if ((attempt == 3)) || ! can_request; then
       return 1
@@ -84,7 +89,7 @@ can_request() {
 # `delete_retry` if the next run should try again, and `delete_limit` on a
 # secondary rate limit. `delete_requests` is the number of requests it sent.
 delete_version() {
-  local url="$1" error_file="$2" status=0 headers check request_id
+  local url="$1" error_file="$2" status=0 headers check request_id full=""
   delete_gone=0
   delete_retry=0
   delete_limit=0
@@ -96,24 +101,28 @@ delete_version() {
   if ((status == 124)); then
     delete_error="no response within ${REQUEST_TIMEOUT}s"
   else
-    delete_error="$(tr -s '[:space:]' ' ' < "${error_file}" | cut -c 1-300)"
+    # the whole message decides, gh puts the status after long ones like the
+    # primary rate limit's; only the log gets a short one
+    full="$(tr -s '[:space:]' ' ' < "${error_file}")"
+    delete_error="$(cut -c 1-300 <<< "${full}")"
     request_id="$(sed -n 's/^x-github-request-id: *\([^[:space:]]*\).*/\1/Ip' <<< "${headers}" | head -n 1)"
     if [[ -n "${request_id}" ]]; then
       delete_error="${delete_error% }, request ${request_id}"
     fi
   fi
-  if [[ "${delete_error}" =~ HTTP\ 404 ]]; then
+  if [[ "${full}" =~ HTTP\ 404 ]]; then
     delete_gone=1
     return 1
   fi
-  if [[ "${delete_error}" =~ (secondary\ rate\ limit|HTTP\ 429) ]]; then
+  # the primary (`API rate limit exceeded`) and the secondary rate limit
+  if [[ "${full}" =~ (rate\ limit|HTTP\ 429) ]]; then
     delete_limit=1
     return 1
   fi
   # only client errors are lasting; anything else, like a server error, a
   # timeout or a broken response (`unexpected end of JSON input`), may pass
   # next time
-  if ! [[ "${delete_error}" =~ HTTP\ 4[0-9][0-9] ]]; then
+  if ! [[ "${full}" =~ HTTP\ 4[0-9][0-9] ]]; then
     delete_retry=1
     # the version may be deleted despite the error. The budget for this check
     # is reserved with the delete, see `cleanup_package`.
@@ -122,7 +131,7 @@ delete_version() {
       if ! check="$(gh_api --silent "${url}" 2>&1)"; then
         if [[ "${check}" =~ HTTP\ 404 ]]; then
           delete_gone=1
-        elif [[ "${check}" =~ (secondary\ rate\ limit|HTTP\ 429) ]]; then
+        elif [[ "${check}" =~ (rate\ limit|HTTP\ 429) ]]; then
           delete_limit=1
         fi
       fi
@@ -177,7 +186,7 @@ cleanup_package() {
   local api="/orgs/${ORG}/packages/container/${package}/versions"
   local versions selected id tags
 
-  local page=1 page_deleted reads=0
+  local page=1 page_deleted reads=0 read_status
   while true; do
     if ((MAX_PAGES > 0 && reads >= MAX_PAGES)); then
       echo "${package}: read ${reads} pages, the limit"
@@ -188,7 +197,12 @@ cleanup_package() {
       stopped="${package} at page ${page}"
       return
     fi
-    if ! gh_get "${api}?per_page=100&page=${page}"; then
+    read_status=0
+    gh_get "${api}?per_page=100&page=${page}" || read_status=$?
+    if ((read_status == 2)); then
+      stopped="${package} at page ${page}, rate limited"
+      return
+    elif ((read_status != 0)); then
       echo "::error::failed to read page ${page} of ${package}"
       exit 1
     fi
